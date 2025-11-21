@@ -1,0 +1,5 @@
+{
+  "name": "Peachy: AI Video Animator",
+  "description": "Upload a photo, write a prompt, and watch it come to life as a video! This app uses Google's Veo model to animate your images.",
+  "requestFramePermissions": []
+}
