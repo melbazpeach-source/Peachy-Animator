@@ -4,7 +4,7 @@ import { PeachIcon } from './components/PeachIcon';
 import Login from './Login';
 
 // --- CONFIGURATION ---
-const MY_GIFT_KEY = "PASTE_YOUR_API_KEY_HERE";
+const MY_GIFT_KEY = "AIzaSyDugFVuquPk7owViAjCCvikn7KwQP0gTOg";
 
 const loadingMessages = [
 "Warming up the animation engines...",
