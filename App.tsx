@@ -157,6 +157,7 @@ return (
 <main className="w-full max-w-xl bg-white/95 p-8 rounded-3xl shadow-2xl relative z-10">
 {!isLoggedIn ? (
 <div className="text-center">
+  
   <h1 className="text-6xl mb-4">🎂</h1>
 <h2 className="text-5xl font-bold text-orange-600 mb-2">
 Happy Birthday!
@@ -164,9 +165,25 @@ Happy Birthday!
 <p className="text-xl text-gray-600 mb-8">
 Ready to make some magic? ✨
 </p>
-<Login onLoginSuccess={() => setIsLoggedIn(true)} />
+  
+{/* THE LOGIN PART WITH CONFETTI */}
+<Login onLoginSuccess={() => {
+setIsLoggedIn(true);
+confetti({
+particleCount: 150,
+spread: 70,
+origin: { y: 0.6 },
+colors: ['#ff69b4', '#ffa500', '#ffff00']
+});
+}} />
+  
 </div>
 ) : (
+<div className="space-y-4">
+<div className="flex justify-between items-center mb-4">
+<h2 className="text-xl font-bold text-orange-600">Create Magic</h2>
+<button onClick={() => setIsLoggedIn(false)} className="text-xs font-bold text-gray-400 underline">Sign Out</button>
+</div>
 <AnimatorEngine />
 )}
 </main>
