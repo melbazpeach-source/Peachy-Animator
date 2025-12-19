@@ -144,7 +144,7 @@ const [isLoggedIn, setIsLoggedIn] = useState(false);
 return (
 <div className="min-h-screen w-full relative">
 <div className="fixed inset-0 -z-10 bg-orange-100">
-<img src="https://images.unsplash.com/photo-1620916566398-39f1143ab7be?q=80&w=2574&auto=format&fit=crop" className="w-full h-full object-cover opacity-60" />
+<img src="https://images.unsplash.com/photo-1746124310569-64dce183ec38?q=80&w=1974&auto=format&fit=crop" className="w-full h-full object-cover opacity-60" />
 </div>
 
 <div className="flex flex-col items-center p-4">
