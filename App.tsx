@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { PeachIcon } from './components/PeachIcon';
-import confetti from 'canvas-confetti';
 import Login from './Login';
 
 // --- CONFIGURATION ---
@@ -143,49 +142,58 @@ const [isLoggedIn, setIsLoggedIn] = useState(false);
 
 return (
 <div className="min-h-screen w-full relative">
+{/* Background with a soft blur */}
 <div className="fixed inset-0 -z-10 bg-orange-100">
-<img src="https://images.unsplash.com/photo-1746124310569-64dce183ec38?q=80&w=1974&auto=format&fit=crop" className="w-full h-full object-cover opacity-60" />
+<img src="https://images.unsplash.com/photo-1620916566398-39f1143ab7be?q=80&w=2574&auto=format&fit=crop" className="w-full h-full object-cover opacity-60" />
 </div>
 
 <div className="flex flex-col items-center p-4">
 <header className="text-center my-8">
 <PeachIcon className="w-16 h-16 mx-auto mb-2" />
 <h1 className="text-5xl font-bold text-white drop-shadow-lg">Peachy Web</h1>
-{isLoggedIn && <button onClick={() => setIsLoggedIn(false)} className="mt-2 text-white/80 underline text-xs">Sign Out</button>}
 </header>
 
 <main className="w-full max-w-xl bg-white/95 p-8 rounded-3xl shadow-2xl relative z-10">
+
 {!isLoggedIn ? (
 <div className="text-center">
-  
-  <h1 className="text-6xl mb-4">🎂</h1>
-<h2 className="text-5xl font-bold text-orange-600 mb-2">
+{/* BIG BOUNCING CAKE */}
+<div className="text-7xl mb-6 animate-bounce">🎂</div>
+
+<h2 className="text-5xl font-extrabold text-orange-600 mb-2">
 Happy Birthday!
 </h2>
-<p className="text-xl text-gray-600 mb-8">
+
+<p className="text-xl text-gray-600 mb-8 font-medium">
 Ready to make some magic? ✨
 </p>
-  
-{/* THE LOGIN PART WITH CONFETTI */}
+
+{/* LOGIN BUTTON THAT TRIGGERS CONFETTI */}
 <Login onLoginSuccess={() => {
 setIsLoggedIn(true);
-confetti({
+const script = document.createElement('script');
+script.src = 'https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js';
+script.onload = () => {
+(window as any).confetti({
 particleCount: 150,
 spread: 70,
-origin: { y: 0.6 },
-colors: ['#ff69b4', '#ffa500', '#ffff00']
+origin: { y: 0.6 }
 });
+};
+document.head.appendChild(script);
 }} />
-  
+
 </div>
 ) : (
 <div className="space-y-4">
 <div className="flex justify-between items-center mb-4">
 <h2 className="text-xl font-bold text-orange-600">Create Magic</h2>
-<button onClick={() => setIsLoggedIn(false)} className="text-xs font-bold text-gray-400 underline">Sign Out</button>
+<button onClick={() => setIsLoggedIn(false)} className="text-xs font-bold text-gray-400 underline uppercase tracking-widest">Sign Out</button>
 </div>
 <AnimatorEngine />
+</div>
 )}
+
 </main>
 </div>
 </div>
