@@ -157,8 +157,13 @@ return (
 <main className="w-full max-w-xl bg-white/95 p-8 rounded-3xl shadow-2xl relative z-10">
 {!isLoggedIn ? (
 <div className="text-center">
-<h2 className="text-2xl font-bold text-orange-600 mb-4">🍑 Happy Birthday!</h2>
-<p className="text-gray-600 mb-6 italic text-sm">Hope you have an amazing day making some magic.</p>
+  <h1 className="text-6xl mb-4">🎂</h1>
+<h2 className="text-5xl font-bold text-orange-600 mb-2">
+Happy Birthday!
+</h2>
+<p className="text-xl text-gray-600 mb-8">
+Ready to make some magic? ✨
+</p>
 <Login onLoginSuccess={() => setIsLoggedIn(true)} />
 </div>
 ) : (
