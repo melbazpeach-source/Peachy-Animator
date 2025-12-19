@@ -21,7 +21,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     <div className="relative min-h-screen w-full flex items-center justify-center p-4">
       {/* Matching Background */}
       <div className="fixed inset-0 -z-10">
-         <img src="https://images.unsplash.com/photo-1620916566398-39f1143ab7be?q=80&w=2574&auto=format&fit=crop" className="w-full h-full object-cover opacity-90" alt="bg" />
+         <img src="https://images.unsplash.com/photo-1746124310569-64dce183ec38?q=80&w=1974&auto=format&fit=crop" className="w-full h-full object-cover opacity-90" alt="bg" />
          <div className="absolute inset-0 bg-white/30 backdrop-blur-[1px]"></div>
       </div>
 
