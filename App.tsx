@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { PeachIcon } from './components/PeachIcon';
+import Login from './Login';
 
 const loadingMessages = [
   "Warming up the animation engines...",
@@ -25,6 +26,7 @@ const fileToBase64 = (file: File): Promise<string> =>
   });
 
 const App: React.FC = () => {
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [apiKeySelected, setApiKeySelected] = useState<boolean | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -35,6 +37,9 @@ const App: React.FC = () => {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSharing, setIsSharing] = useState(false);
+  if (!isLoggedIn) {
+return <Login onLoginSuccess={() => setIsLoggedIn(true)} />;
+}
 
   const loadingIntervalRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
