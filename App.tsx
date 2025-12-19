@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { PeachIcon } from './components/PeachIcon';
+import confetti from 'canvas-confetti';
 import Login from './Login';
 
 // --- CONFIGURATION ---
