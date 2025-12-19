@@ -5,7 +5,7 @@ import Login from './Login';
 
 // --- CONFIGURATION ---
 // Paste your BRAND NEW key inside these quotes
-const MY_GIFT_KEY = "YOUR_NEW_ROTATED_KEY_HERE";
+const MY_GIFT_KEY = "AIzaSyDZwYp5OI_Z7rLGeeMJPuRv8nF_0-9g1yU";
 
 const loadingMessages = [
 "Warming up the animation engines...",
