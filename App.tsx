@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI } from '@google/genai';
+import Login from './Login';
 import { PeachIcon } from './components/PeachIcon';
 import { ImageCropperModal } from './components/ImageCropperModal';
+import { BackgroundRotator } from './components/BackgroundRotator';
 import { 
   getSavedVideos, 
   saveVideo, 
@@ -143,9 +145,16 @@ const renderOverlayEffect = (styleId: string) => {
 };
 
 const App: React.FC = () => {
-  // Firebase Auth and sync state
+  // Authentication session state
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('peachy_logged_in') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   const [apiKeySelected, setApiKeySelected] = useState<boolean | null>(null);
@@ -385,6 +394,11 @@ const App: React.FC = () => {
   useEffect(() => {
     const checkKey = async () => {
       try {
+        const envKey = process.env.API_KEY || (import.meta as any).env?.VITE_PEACHY_KEY || (process as any).env?.GEMINI_API_KEY;
+        if (envKey && envKey !== 'PLACEHOLDER_API_KEY') {
+          setApiKeySelected(true);
+          return;
+        }
         if (window.aistudio) {
           const hasKey = await window.aistudio.hasSelectedApiKey();
           setApiKeySelected(hasKey);
@@ -395,8 +409,7 @@ const App: React.FC = () => {
         }
       } catch (e) {
         console.error("Error checking for API key:", e);
-        setError("Could not check for API key. Please refresh the page.");
-        setApiKeySelected(false);
+        setApiKeySelected(true);
       }
     };
     checkKey();
@@ -462,7 +475,8 @@ const App: React.FC = () => {
     }, 3000);
     
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const apiKey = process.env.API_KEY || (import.meta as any).env?.VITE_PEACHY_KEY || (process as any).env?.GEMINI_API_KEY;
+      const ai = new GoogleGenAI({ apiKey });
       const imageBase64 = await fileToBase64(imageFile);
       
       const getMotionDescriptor = (strength: number): string => {
@@ -722,6 +736,11 @@ const App: React.FC = () => {
     setIsAuthLoading(true);
     try {
       await signOut(auth);
+      try {
+        localStorage.removeItem('peachy_logged_in');
+        localStorage.removeItem('peachy_user_email');
+      } catch {}
+      setIsLoggedIn(false);
       // Fallback: reset list to localIndexedDB items
       const localVideos = await getSavedVideos();
       setSavedVideos(localVideos);
@@ -1885,6 +1904,22 @@ const App: React.FC = () => {
     );
   };
 
+  if (isAuthLoading) {
+    return (
+      <div className="relative min-h-screen w-full flex items-center justify-center p-4">
+        <div className="fixed inset-0 -z-10 bg-orange-50/80"></div>
+        <div className="flex flex-col items-center gap-3 bg-white/85 backdrop-blur-md p-8 rounded-3xl border border-white/60 shadow-xl text-center">
+          <PeachIcon className="w-16 h-16 animate-bounce" />
+          <p className="text-orange-950 font-bold text-base">Loading Peachy Web...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isLoggedIn && !user) {
+    return <Login onLoginSuccess={() => setIsLoggedIn(true)} />;
+  }
+
   return (
     <div className="relative min-h-screen w-full font-sans text-gray-800 overflow-x-hidden selection:bg-orange-200">
       <style>{`
@@ -1908,18 +1943,8 @@ const App: React.FC = () => {
           top: -50%;
         }
       `}</style>
-      {/* Background Layer */}
-      <div className="fixed inset-0 -z-10">
-         <div className="absolute inset-0 bg-orange-50"></div>
-         {/* Fruit Splash Background Image */}
-         <img
-            src="https://images.unsplash.com/photo-1620916566398-39f1143ab7be?q=80&w=2574&auto=format&fit=crop"
-            alt="Fruit Background"
-            className="w-full h-full object-cover opacity-90"
-         />
-         {/* Overlay to ensure text readability */}
-         <div className="absolute inset-0 bg-white/30 backdrop-blur-[1px]"></div>
-      </div>
+      {/* Dynamic Rotating Background Layer */}
+      <BackgroundRotator />
 
       <div className="flex flex-col items-center min-h-screen p-4 sm:p-6 lg:p-8">
           {/* Header */}
@@ -1968,14 +1993,23 @@ const App: React.FC = () => {
                     </button>
                   </div>
                 ) : (
-                  <button 
-                    onClick={handleLogin}
-                    className="flex items-center gap-2 bg-gradient-to-r from-orange-400 to-pink-500 hover:from-orange-500 hover:to-pink-600 hover:shadow-lg text-white font-extrabold py-2 px-5 rounded-full text-xs transition-all duration-300 shadow-md transform hover:-translate-y-0.5 cursor-pointer border border-white/20"
-                    title="Sign in with your Google Account to automatically back up your animation parameters and prompts to the cloud!"
-                  >
-                    <span className="text-sm">☁️</span>
-                    <span>Google Cloud Backup (Sign In)</span>
-                  </button>
+                  <div className="flex items-center gap-2.5 bg-white/95 backdrop-blur-md py-1 px-3 sm:px-4 rounded-full text-xs font-bold text-orange-950 shadow-md border border-white">
+                    <span>👋 Guest Creator</span>
+                    <button 
+                      onClick={handleLogin}
+                      className="flex items-center gap-1 bg-gradient-to-r from-orange-400 to-pink-500 hover:from-orange-500 hover:to-pink-600 text-white font-extrabold py-1 px-3 rounded-full text-[11px] transition-all shadow-xs cursor-pointer"
+                      title="Connect Google Account to back up animations to cloud"
+                    >
+                      <span>☁️</span>
+                      <span>Connect Google</span>
+                    </button>
+                    <button 
+                      onClick={handleLogout}
+                      className="text-[11px] bg-orange-50 hover:bg-orange-100 text-orange-700 hover:text-orange-950 border border-orange-200 hover:border-orange-300 transition-all py-0.5 px-2 rounded-md font-bold cursor-pointer"
+                    >
+                      Exit
+                    </button>
+                  </div>
                 )}
               </div>
           </header>
