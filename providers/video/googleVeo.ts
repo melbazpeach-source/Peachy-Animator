@@ -34,11 +34,17 @@ export const googleVeoEngine: VideoEngine = {
     const ai = new GoogleGenAI({ apiKey });
     onProgress?.("Contacting Google Veo video engine...");
 
+    // Framing lock directive: Prepend to user prompt on every generateVideos call
+    const framingLockDirective = "Locked camera, no pan, no zoom, no tilt. Keep the full subject inside the frame with a small margin. Nothing important may leave the edges.";
+    const effectivePrompt = options.prompt.includes("Locked camera")
+      ? options.prompt
+      : `${framingLockDirective} ${options.prompt}`;
+
     let operation;
     try {
       operation = await ai.models.generateVideos({
         model: 'veo-3.1-lite-generate-preview',
-        prompt: options.prompt,
+        prompt: effectivePrompt,
         image: {
           imageBytes: options.image.imageBytes,
           mimeType: options.image.mimeType,
@@ -55,7 +61,7 @@ export const googleVeoEngine: VideoEngine = {
         console.warn("Retrying without durationSeconds to use Veo model default (5s):", errMsg);
         operation = await ai.models.generateVideos({
           model: 'veo-3.1-lite-generate-preview',
-          prompt: options.prompt,
+          prompt: effectivePrompt,
           image: {
             imageBytes: options.image.imageBytes,
             mimeType: options.image.mimeType,
@@ -89,7 +95,7 @@ export const googleVeoEngine: VideoEngine = {
         console.warn("Retrying with default durationSeconds (5s)...");
         operation = await ai.models.generateVideos({
           model: 'veo-3.1-lite-generate-preview',
-          prompt: options.prompt,
+          prompt: effectivePrompt,
           image: {
             imageBytes: options.image.imageBytes,
             mimeType: options.image.mimeType,

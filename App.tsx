@@ -52,7 +52,11 @@ import {
   Scissors,
   ChevronDown,
   Sliders,
-  AlertCircle
+  AlertCircle,
+  Eye,
+  Maximize2,
+  AlertTriangle,
+  X
 } from 'lucide-react';
 import { 
   VideoEngineId, 
@@ -88,6 +92,129 @@ const fileToBase64 = (file: File): Promise<string> =>
     };
     reader.onerror = (error) => reject(error);
   });
+
+/**
+ * Headroom & Motion Padding for Veo:
+ * Pads the source image with extra empty space / headroom on top (and a bit on the sides)
+ * before sending to Veo. Seamlessly extends the image's top edge (e.g. sky, wall, or backdrop)
+ * so vertical movements like bounces, jumps, or hops have ample ceiling space and never clip.
+ */
+const preparePaddedImageForVeo = async (
+  file: File,
+  targetAspectRatio: '16:9' | '9:16'
+): Promise<{ imageBytes: string; mimeType: string }> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = (err) => reject(err);
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = (err) => reject(err);
+      img.onload = () => {
+        const isLandscape = targetAspectRatio === '16:9';
+        const targetWidth = isLandscape ? 1280 : 720;
+        const targetHeight = isLandscape ? 720 : 1280;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          const rawBase64 = (reader.result as string).split(',')[1];
+          return resolve({ imageBytes: rawBase64, mimeType: file.type });
+        }
+
+        // Sample top edge and bottom edge colors from source image to naturally blend the headroom
+        let topColor = 'rgba(235, 235, 240, 1)';
+        let bottomColor = 'rgba(215, 215, 220, 1)';
+
+        try {
+          const sampleCanvas = document.createElement('canvas');
+          sampleCanvas.width = img.naturalWidth;
+          sampleCanvas.height = img.naturalHeight;
+          const sCtx = sampleCanvas.getContext('2d');
+          if (sCtx) {
+            sCtx.drawImage(img, 0, 0);
+            const midX = Math.floor(img.naturalWidth * 0.25);
+            const spanW = Math.max(1, Math.floor(img.naturalWidth * 0.5));
+
+            // Sample top edge row (e.g. sky above castle/head)
+            const topData = sCtx.getImageData(midX, 0, spanW, Math.min(6, img.naturalHeight)).data;
+            let rt = 0, gt = 0, bt = 0, ct = 0;
+            for (let i = 0; i < topData.length; i += 4) {
+              rt += topData[i];
+              gt += topData[i + 1];
+              bt += topData[i + 2];
+              ct++;
+            }
+            if (ct > 0) {
+              topColor = `rgb(${Math.round(rt / ct)}, ${Math.round(gt / ct)}, ${Math.round(bt / ct)})`;
+            }
+
+            // Sample bottom edge row (ground/floor)
+            const botY = Math.max(0, img.naturalHeight - 6);
+            const botData = sCtx.getImageData(midX, botY, spanW, Math.min(6, img.naturalHeight)).data;
+            let rb = 0, gb = 0, bb = 0, cb = 0;
+            for (let i = 0; i < botData.length; i += 4) {
+              rb += botData[i];
+              gb += botData[i + 1];
+              bb += botData[i + 2];
+              cb++;
+            }
+            if (cb > 0) {
+              bottomColor = `rgb(${Math.round(rb / cb)}, ${Math.round(gb / cb)}, ${Math.round(bb / cb)})`;
+            }
+          }
+        } catch (sampleErr) {
+          console.warn("Could not sample image edge colors:", sampleErr);
+        }
+
+        // 1. Fill canvas background with subtle matching gradient
+        const bgGrad = ctx.createLinearGradient(0, 0, 0, targetHeight);
+        bgGrad.addColorStop(0, topColor);
+        bgGrad.addColorStop(0.65, topColor);
+        bgGrad.addColorStop(1, bottomColor);
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, targetWidth, targetHeight);
+
+        // 2. Add smooth, blurred image atmosphere so surrounding textures extend seamlessly
+        ctx.save();
+        ctx.filter = 'blur(45px)';
+        ctx.globalAlpha = 0.4;
+        ctx.drawImage(img, -15, -15, targetWidth + 30, targetHeight + 30);
+        ctx.restore();
+
+        // 3. Headroom & Motion Padding:
+        // Reserve generous ceiling space (16%) on top and a safe margin on the sides
+        // so upward movement (bounce, jump, hop) stays fully inside the frame.
+        const topHeadroomPct = 0.16; // 16% headroom
+        const sideMarginPct = 0.06;  // 6% side margin
+        const bottomMarginPct = 0.04;// 4% bottom margin
+
+        const maxAvailableW = targetWidth * (1 - sideMarginPct * 2);
+        const maxAvailableH = targetHeight * (1 - topHeadroomPct - bottomMarginPct);
+
+        const scale = Math.min(maxAvailableW / img.naturalWidth, maxAvailableH / img.naturalHeight);
+        const drawW = Math.round(img.naturalWidth * scale);
+        const drawH = Math.round(img.naturalHeight * scale);
+
+        // Center horizontally
+        const drawX = Math.round((targetWidth - drawW) / 2);
+        // Anchor below the top headroom space with room to jump
+        const drawY = Math.round(targetHeight * topHeadroomPct + (maxAvailableH - drawH) / 2);
+
+        // 4. Draw sharp source image onto the padded canvas
+        ctx.drawImage(img, drawX, drawY, drawW, drawH);
+
+        // Export as JPEG
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+        const base64 = dataUrl.split(',')[1];
+        resolve({ imageBytes: base64, mimeType: 'image/jpeg' });
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+};
 
 const STYLE_FILTERS = [
   {
@@ -280,6 +407,26 @@ const App: React.FC = () => {
   const [exportPreset, setExportPreset] = useState<ExportPreset>('cinematic');
   const [mediaUrls, setMediaUrls] = useState<Record<string, { image: string; video: string }>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Gallery Display Mode & Full-View Lightbox state
+  const [galleryFitMode, setGalleryFitMode] = useState<'fit' | 'cover'>(() => {
+    try {
+      return (localStorage.getItem('peachy_gallery_fit_mode') as 'fit' | 'cover') || 'fit';
+    } catch {
+      return 'fit';
+    }
+  });
+  const [galleryPreviewVideo, setGalleryPreviewVideo] = useState<SavedVideo | null>(null);
+  const [isUploadedImagePortrait, setIsUploadedImagePortrait] = useState<boolean>(false);
+
+  const handleToggleGalleryFitMode = (mode: 'fit' | 'cover') => {
+    setGalleryFitMode(mode);
+    try {
+      localStorage.setItem('peachy_gallery_fit_mode', mode);
+    } catch (e) {
+      console.warn('Unable to persist gallery fit mode:', e);
+    }
+  };
 
   // Drag and Drop State
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -513,7 +660,13 @@ const App: React.FC = () => {
       }
       const reader = new FileReader();
       reader.onloadend = () => {
-        setRawImageSrc(reader.result as string);
+        const result = reader.result as string;
+        setRawImageSrc(result);
+        const img = new Image();
+        img.onload = () => {
+          setIsUploadedImagePortrait(img.naturalHeight > img.naturalWidth * 1.05);
+        };
+        img.src = result;
         if (autoCrop) {
           setIsCropperOpen(true);
         }
@@ -569,7 +722,13 @@ const App: React.FC = () => {
       }
       const reader = new FileReader();
       reader.onloadend = () => {
-        setRawImageSrc(reader.result as string);
+        const result = reader.result as string;
+        setRawImageSrc(result);
+        const img = new Image();
+        img.onload = () => {
+          setIsUploadedImagePortrait(img.naturalHeight > img.naturalWidth * 1.05);
+        };
+        img.src = result;
         if (autoCrop) {
           setIsCropperOpen(true);
         }
@@ -626,7 +785,9 @@ const App: React.FC = () => {
     }, 3000);
     
     try {
-      const imageBase64 = await fileToBase64(imageFile);
+      // 1. Prepare image with headroom & motion padding:
+      // If the source image is tight, pad/letterbox it before Veo so bounce/jump motions have headroom.
+      const paddedImage = await preparePaddedImageForVeo(imageFile, aspectRatio);
       
       const getMotionDescriptor = (strength: number): string => {
         if (strength <= 2) return "slight subtle movement, gentle sway, almost still, cinematic calm, slow panning";
@@ -636,14 +797,26 @@ const App: React.FC = () => {
         return "extremely high velocity motion, explosive rapid movement, cinematic fast tracking, hyper kinetic energetic flow";
       };
 
-      const finalPrompt = `${prompt.trim()}, ${getMotionDescriptor(motionStrength)}`;
+      const userPromptLower = prompt.toLowerCase();
+      const isVerticalMotion = 
+        userPromptLower.includes('jump') || 
+        userPromptLower.includes('bounce') || 
+        userPromptLower.includes('hop') || 
+        userPromptLower.includes('leap');
+
+      // 2. Framing lock: Prepend to user prompt on every generateVideos call (do not replace user prompt)
+      const framingLockPrefix = isVerticalMotion
+        ? "Bounce in place, small amplitude. Locked camera, no pan, no zoom, no tilt. Keep the full subject inside the frame with a small margin. The entire subject and all top details stay fully visible for every frame. Nothing may exit the top edge. "
+        : "Locked camera, no pan, no zoom, no tilt. Keep the full subject inside the frame with a small margin. Nothing important may leave the edges. ";
+
+      const finalPrompt = `${framingLockPrefix}${prompt.trim()}, ${getMotionDescriptor(motionStrength)}`;
 
       // Execute via the selected video engine interface
       const videoBlob = await engine.generateVideo(
         {
           image: {
-            imageBytes: imageBase64,
-            mimeType: imageFile.type,
+            imageBytes: paddedImage.imageBytes,
+            mimeType: paddedImage.mimeType,
           },
           prompt: finalPrompt,
           aspectRatio,
@@ -782,6 +955,7 @@ const App: React.FC = () => {
     setStyleFilter('none');
     setCurrentVideoBlob(null);
     setHasSavedCurrent(false);
+    setIsUploadedImagePortrait(false);
     if (fileInputRef.current) {
         fileInputRef.current.value = "";
     }
@@ -1811,8 +1985,45 @@ const App: React.FC = () => {
             </div>
           )}
           </div>
+
+          {/* Portrait Image Guidance Banner */}
+          {imagePreview && isUploadedImagePortrait && aspectRatio === '16:9' && (
+            <div className="mt-3 bg-amber-50/95 border-2 border-amber-300/80 rounded-2xl p-3.5 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fade-in">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs sm:text-sm font-extrabold text-amber-950">
+                    Portrait Image Detected (Prevents Top Cutoff)
+                  </p>
+                  <p className="text-[11px] sm:text-xs text-amber-850 leading-relaxed mt-0.5">
+                    Your photo is tall/vertical. Landscape (16:9) will center-crop and cut off the top. Switch to <strong>Portrait (9:16)</strong> or adjust the crop position so the top stays in frame!
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setAspectRatio('9:16')}
+                  className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold py-1.5 px-3 rounded-xl shadow-xs transition-all active:scale-95 cursor-pointer"
+                >
+                  Switch to 9:16
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const src = rawImageSrc || imagePreview;
+                    setRawImageSrc(src);
+                    setIsCropperOpen(true);
+                  }}
+                  className="bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold py-1.5 px-3 rounded-xl shadow-2xs transition-all active:scale-95 cursor-pointer"
+                >
+                  Crop & Position
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-        
+
         {/* Prompt Input */}
         <div>
           <div className="flex items-center justify-between mb-2">
@@ -2311,15 +2522,50 @@ const App: React.FC = () => {
           {/* Saved Gallery Card */}
           {apiKeySelected && (
             <section className="w-full max-w-2xl bg-white/85 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/60 p-6 sm:p-10 transition-all duration-300 relative z-10 mb-12">
-               <div className="flex items-center justify-between mb-6">
+               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-orange-100/60">
                   <div className="flex items-center gap-2">
                      <Library className="w-6 h-6 text-orange-500" />
-                     <h2 className="text-2xl font-bold text-orange-950">My Gallery</h2>
+                     <div>
+                        <div className="flex items-center gap-2">
+                           <h2 className="text-2xl font-bold text-orange-950">My Gallery</h2>
+                           {savedVideos.length > 0 && (
+                              <span className="bg-orange-100 text-orange-850 px-2.5 py-0.5 rounded-full text-xs font-bold">
+                                 {savedVideos.length} Anim{savedVideos.length !== 1 ? 's' : ''}
+                              </span>
+                           )}
+                        </div>
+                        <p className="text-xs text-orange-700/80">Saved animations from your local device & cloud</p>
+                     </div>
                   </div>
+
                   {savedVideos.length > 0 && (
-                     <span className="bg-orange-100 text-orange-850 px-3 py-1 rounded-full text-xs font-semibold">
-                        {savedVideos.length} Anim{savedVideos.length !== 1 ? 's' : ''} saved
-                     </span>
+                     <div className="flex items-center gap-1.5 self-start sm:self-auto bg-orange-100/70 p-1 rounded-xl text-xs font-bold">
+                        <span className="text-[11px] text-orange-800/80 px-1 hidden xs:inline">Display:</span>
+                        <button
+                           type="button"
+                           onClick={() => handleToggleGalleryFitMode('fit')}
+                           className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                              galleryFitMode === 'fit'
+                                 ? 'bg-white text-orange-950 shadow-xs font-extrabold'
+                                 : 'text-orange-800 hover:text-orange-950'
+                           }`}
+                           title="Display entire image/video without any cropping at the top or edges"
+                        >
+                           <span>✨ Fit Entire</span>
+                        </button>
+                        <button
+                           type="button"
+                           onClick={() => handleToggleGalleryFitMode('cover')}
+                           className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                              galleryFitMode === 'cover'
+                                 ? 'bg-white text-orange-950 shadow-xs font-extrabold'
+                                 : 'text-orange-800 hover:text-orange-950'
+                           }`}
+                           title="Fill thumbnail card (aligns to top)"
+                        >
+                           <span>Fill Card</span>
+                        </button>
+                     </div>
                   )}
                </div>
 
@@ -2343,8 +2589,8 @@ const App: React.FC = () => {
                         const timeStr = new Date(video.createdAt).toLocaleTimeString(undefined, {
                            hour: '2-digit',
                            minute: '2-digit'
-                             });
-                         const isCurrent = currentVideoBlob && video.videoBlob && (
+                        });
+                        const isCurrent = currentVideoBlob && video.videoBlob && (
                            video.videoBlob.size === currentVideoBlob.size
                         );
 
@@ -2359,20 +2605,33 @@ const App: React.FC = () => {
                               <div className="space-y-3">
                                  {/* Image Thumbnail Container */}
                                  <div 
-                                    onClick={() => handleLoadSavedVideo(video)}
-                                    className="relative aspect-video w-full rounded-xl overflow-hidden bg-black/5 border border-orange-100 cursor-pointer group-hover:shadow"
+                                    onClick={() => setGalleryPreviewVideo(video)}
+                                    className={`relative w-full rounded-xl overflow-hidden bg-zinc-950 border border-orange-100 cursor-pointer group-hover:shadow transition-all ${
+                                       video.aspectRatio === '9:16'
+                                          ? 'aspect-[4/5] sm:aspect-[9/16] max-h-[290px]'
+                                          : 'aspect-video'
+                                    }`}
                                  >
                                     {urls.image ? (
-                                       <img src={urls.image} alt={video.prompt} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                                       <img 
+                                          src={urls.image} 
+                                          alt={video.prompt} 
+                                          className={`w-full h-full transition-all duration-300 ${
+                                             galleryFitMode === 'fit'
+                                                ? 'object-contain bg-zinc-950 p-0.5'
+                                                : 'object-cover object-top group-hover:scale-105'
+                                          }`} 
+                                       />
                                     ) : (
                                        <div className="w-full h-full bg-gradient-to-br from-pink-50 to-orange-50 flex items-center justify-center">
                                           <FileVideo className="w-8 h-8 text-orange-300" />
                                        </div>
                                     )}
-                                    {/* Play Hover Overlay */}
-                                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                                       <div className="p-2.5 bg-white/95 rounded-full text-orange-500 shadow-md transform scale-90 group-hover:scale-100 transition-transform duration-300">
-                                          <Play className="w-4 h-4 fill-current ml-0.5" />
+                                    {/* Play / Full View Hover Overlay */}
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center gap-2">
+                                       <div className="py-1.5 px-3 bg-white/95 rounded-full text-orange-600 shadow-md transform scale-90 group-hover:scale-100 transition-transform duration-200 flex items-center gap-1.5 text-xs font-extrabold">
+                                          <Eye className="w-3.5 h-3.5 text-orange-500" />
+                                          <span>Full View</span>
                                        </div>
                                     </div>
                                     {/* Aspect Ratio & Duration Badges */}
@@ -2424,11 +2683,19 @@ const App: React.FC = () => {
                               <div className="flex items-center justify-end gap-1.5 mt-3 pt-2.5 border-t border-orange-100/60">
                                  <button
                                     onClick={() => handleLoadSavedVideo(video)}
-                                    className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg text-xs font-bold bg-orange-100 text-orange-950 hover:bg-orange-200 transition-colors"
+                                    className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg text-xs font-bold bg-orange-100 text-orange-950 hover:bg-orange-200 transition-colors cursor-pointer"
                                     title="Load into standard player"
                                   >
                                     <Play className="w-3 h-3 fill-current" />
                                     <span>Load</span>
+                                 </button>
+
+                                 <button
+                                    onClick={() => setGalleryPreviewVideo(video)}
+                                    className="p-1.5 rounded-lg text-orange-850 hover:bg-orange-150 transition-colors cursor-pointer"
+                                    title="Open Fullscreen Lightbox Player"
+                                 >
+                                    <Eye className="w-3.5 h-3.5" />
                                  </button>
 
                                  <button
@@ -2440,7 +2707,7 @@ const App: React.FC = () => {
                                        a.click();
                                        document.body.removeChild(a);
                                     }}
-                                    className="p-1.5 rounded-lg text-orange-850 hover:bg-orange-150 transition-colors"
+                                    className="p-1.5 rounded-lg text-orange-850 hover:bg-orange-150 transition-colors cursor-pointer"
                                     title="Download MP4"
                                  >
                                     <Download className="w-3.5 h-3.5" />
@@ -2453,7 +2720,7 @@ const App: React.FC = () => {
                                        setCopiedId(video.id);
                                        setTimeout(() => setCopiedId(null), 2000);
                                     }}
-                                    className="p-1.5 rounded-lg text-orange-850 hover:bg-orange-150 transition-colors relative"
+                                    className="p-1.5 rounded-lg text-orange-850 hover:bg-orange-150 transition-colors relative cursor-pointer"
                                     title="Copy original prompt"
                                  >
                                     {copiedId === video.id ? (
@@ -2465,7 +2732,7 @@ const App: React.FC = () => {
 
                                  <button
                                     onClick={(e) => handleDeleteVideo(video.id, e)}
-                                    className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 hover:text-red-700 transition-colors"
+                                    className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 hover:text-red-700 transition-colors cursor-pointer"
                                     title="Delete animation"
                                  >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -2479,12 +2746,144 @@ const App: React.FC = () => {
             </section>
           )}
       </div>
+
+      {/* Gallery Video Fullscreen Lightbox Modal */}
+      {galleryPreviewVideo && (
+        <div 
+          className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-fade-in"
+          onClick={() => setGalleryPreviewVideo(null)}
+        >
+          <div 
+            className="relative w-full max-w-3xl max-h-[92vh] bg-gradient-to-b from-zinc-900 to-zinc-950 border border-zinc-700/80 rounded-3xl p-4 sm:p-6 shadow-2xl flex flex-col justify-between overflow-y-auto text-white"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Lightbox Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-2 rounded-xl bg-orange-500/20 text-orange-400">
+                  <Film className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-extrabold text-base sm:text-lg text-zinc-100 truncate">
+                    {galleryPreviewVideo.prompt}
+                  </h3>
+                  <div className="flex items-center gap-2 text-xs text-zinc-400">
+                    <span>{new Date(galleryPreviewVideo.createdAt).toLocaleDateString()}</span>
+                    <span>•</span>
+                    <span className="font-mono bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] text-orange-300 font-bold">
+                      {galleryPreviewVideo.aspectRatio}
+                    </span>
+                    {galleryPreviewVideo.durationSeconds && (
+                      <span className="font-mono bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] text-zinc-300">
+                        {galleryPreviewVideo.durationSeconds}s
+                      </span>
+                    )}
+                    {galleryPreviewVideo.motionStrength && (
+                      <span className="font-mono bg-zinc-800 px-1.5 py-0.5 rounded text-[10px] text-pink-300">
+                        Lvl {galleryPreviewVideo.motionStrength}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGalleryPreviewVideo(null)}
+                className="p-2 rounded-full bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors cursor-pointer ml-3 shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Video Stage Container (100% Uncropped Player) */}
+            <div className="my-4 flex items-center justify-center bg-black/80 rounded-2xl border border-zinc-800/80 p-2 sm:p-4 min-h-[300px] max-h-[60vh] overflow-hidden">
+              {mediaUrls[galleryPreviewVideo.id]?.video ? (
+                <video
+                  src={mediaUrls[galleryPreviewVideo.id].video}
+                  autoPlay
+                  loop
+                  controls
+                  playsInline
+                  className="max-h-[55vh] max-w-full w-auto h-auto object-contain rounded-xl shadow-2xl mx-auto block"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center p-8 text-zinc-500">
+                  <FileVideo className="w-12 h-12 mb-2 text-zinc-600" />
+                  <p className="text-sm">Video source unavailable</p>
+                </div>
+              )}
+            </div>
+
+            {/* Lightbox Footer Actions */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-zinc-800">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleLoadSavedVideo(galleryPreviewVideo);
+                    setGalleryPreviewVideo(null);
+                  }}
+                  className="py-2 px-3.5 bg-gradient-to-r from-orange-500 to-pink-500 hover:from-orange-600 hover:to-pink-600 text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>Load into Editor</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = mediaUrls[galleryPreviewVideo.id]?.video;
+                    if (!url) return;
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `peachy-animation-${galleryPreviewVideo.id}.mp4`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                  }}
+                  className="py-2 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-orange-400" />
+                  <span>Download MP4</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(galleryPreviewVideo.prompt);
+                    setCopiedId(galleryPreviewVideo.id);
+                    setTimeout(() => setCopiedId(null), 2000);
+                  }}
+                  className="py-2 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  {copiedId === galleryPreviewVideo.id ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                  )}
+                  <span>{copiedId === galleryPreviewVideo.id ? 'Copied' : 'Copy Prompt'}</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setGalleryPreviewVideo(null)}
+                className="py-2 px-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ImageCropperModal
         isOpen={isCropperOpen}
         onClose={() => setIsCropperOpen(false)}
         imageSrc={rawImageSrc || ''}
         aspectRatio={aspectRatio}
         onCropComplete={handleCropComplete}
+        onAspectRatioChange={(newRatio) => setAspectRatio(newRatio)}
       />
     </div>
   );
