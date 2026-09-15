@@ -56,7 +56,7 @@ export const googleVeoEngine: VideoEngine = {
         }
       });
     } catch (firstErr: any) {
-      const errMsg = firstErr.message || "";
+      const errMsg = firstErr.message || (typeof firstErr === 'object' ? JSON.stringify(firstErr) : String(firstErr));
       if (errMsg.toLowerCase().includes("durationseconds") || errMsg.toLowerCase().includes("duration_seconds")) {
         console.warn("Retrying without durationSeconds to use Veo model default (5s):", errMsg);
         operation = await ai.models.generateVideos({
@@ -72,6 +72,16 @@ export const googleVeoEngine: VideoEngine = {
             aspectRatio: options.aspectRatio,
           }
         });
+      } else if (
+        firstErr.status === "PERMISSION_DENIED" ||
+        firstErr.status === 403 ||
+        errMsg.includes("PERMISSION_DENIED") ||
+        errMsg.includes("403") ||
+        errMsg.includes("The caller does not have permission")
+      ) {
+        throw new Error(
+          "Permission Denied (403): Google Veo requires an active API key with paid billing or Veo access enabled in Google AI Studio / Google Cloud. Please choose a paid API key or verify project permissions."
+        );
       } else {
         throw firstErr;
       }

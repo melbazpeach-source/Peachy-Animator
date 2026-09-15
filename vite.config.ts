@@ -9,11 +9,11 @@ export default defineConfig(({ mode }) => {
     const selectedVideoEngine = env.SELECTED_VIDEO_ENGINE || 'google-veo';
     const selectedTextLLM = env.SELECTED_TEXT_LLM || 'google';
 
-    const geminiKey = env.VITE_PEACHY_KEY || env.GEMINI_API_KEY || env.API_KEY || '';
-    const openaiKey = env.OPENAI_API_KEY || '';
-    const xaiKey = env.XAI_API_KEY || '';
-    const anthropicKey = env.ANTHROPIC_API_KEY || '';
-    const ollamaBaseUrl = env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
+    const geminiKey = env.VITE_PEACHY_KEY || env.GEMINI_API_KEY || env.API_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+    const openaiKey = env.OPENAI_API_KEY || process.env.OPENAI_API_KEY || '';
+    const xaiKey = env.XAI_API_KEY || process.env.XAI_API_KEY || '';
+    const anthropicKey = env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
+    const ollamaBaseUrl = env.OLLAMA_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
 
     // Only inject the selected video engine's key (not every key)
     const selectedVideoKey = selectedVideoEngine === 'google-veo' ? geminiKey : '';

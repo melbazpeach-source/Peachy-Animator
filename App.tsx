@@ -837,9 +837,18 @@ const App: React.FC = () => {
       let errorMessage = err.message || "An unknown error occurred.";
       const errStr = typeof err === 'object' ? JSON.stringify(err) : String(err);
       
-      // Quota / billing errors stay Google-shaped for Veo. Don't map them onto other vendors.
+      // Quota / billing / permission errors stay Google-shaped for Veo. Don't map them onto other vendors.
       if (engine.id === 'google-veo') {
         if (
+          errorMessage.includes("403") ||
+          errorMessage.includes("PERMISSION_DENIED") ||
+          errStr.includes("PERMISSION_DENIED") ||
+          errStr.includes("403") ||
+          errorMessage.toLowerCase().includes("does not have permission") ||
+          errStr.toLowerCase().includes("does not have permission")
+        ) {
+          errorMessage = "Permission Denied (403): Google Veo requires an API key associated with a Google Cloud project with billing/paid tier enabled. Please verify your project billing in AI Studio or select a paid API key.";
+        } else if (
           errorMessage.includes("429") || 
           errorMessage.includes("RESOURCE_EXHAUSTED") || 
           errorMessage.toLowerCase().includes("quota") ||
