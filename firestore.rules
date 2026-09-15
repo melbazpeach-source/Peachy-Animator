@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. Global safety net catch-all: default-deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global helper primitives for authentication and validation
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 3. Animation schema validation function
+    function isValidAnimation(data) {
+      return data.keys().hasAll(['id', 'prompt', 'aspectRatio', 'durationSeconds', 'motionStrength', 'styleFilter', 'createdAt', 'userId'])
+        && data.keys().size() <= 10 // allows optional videoUrl and other non-shadow metadata
+        && data.id is string && isValidId(data.id)
+        && data.prompt is string && data.prompt.size() > 0 && data.prompt.size() <= 1000
+        && (data.aspectRatio == '16:9' || data.aspectRatio == '9:16')
+        && data.durationSeconds is number && data.durationSeconds >= 4 && data.durationSeconds <= 8
+        && data.motionStrength is number && data.motionStrength >= 1 && data.motionStrength <= 10
+        && data.styleFilter is string && data.styleFilter.size() <= 128
+        && data.createdAt is int && data.createdAt > 0
+        && data.userId is string && data.userId == request.auth.uid
+        && (data.get('videoUrl', '') is string && data.get('videoUrl', '').size() <= 4096);
+    }
+
+    // 4. Secure collection matching
+    match /animations/{animationId} {
+      // Apply path poisoning guard
+      allow get: if isSignedIn() && isValidId(animationId) && existing().userId == request.auth.uid;
+      
+      // Relational validation for queries (list)
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if isSignedIn() && isValidId(animationId) && isValidAnimation(incoming());
+
+      allow update: if isSignedIn() && isValidId(animationId) && isValidAnimation(incoming()) && (
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().id == existing().id &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['styleFilter', 'videoUrl'])
+      );
+
+      allow delete: if isSignedIn() && isValidId(animationId) && existing().userId == request.auth.uid;
+    }
+  }
+}

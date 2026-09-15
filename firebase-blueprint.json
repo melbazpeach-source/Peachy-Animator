@@ -1,0 +1,55 @@
+{
+  "entities": {
+    "animation": {
+      "title": "Animation",
+      "description": "An AI-animated video metadata record saved by a user",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the animation"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Original text prompt used to animate the image"
+        },
+        "aspectRatio": {
+          "type": "string",
+          "enum": ["16:9", "9:16"],
+          "description": "The shape of the generated video"
+        },
+        "durationSeconds": {
+          "type": "number",
+          "description": "Duration of the clip in seconds"
+        },
+        "motionStrength": {
+          "type": "number",
+          "description": "Strength level of movement from 1 to 10"
+        },
+        "styleFilter": {
+          "type": "string",
+          "description": "Selected cinematic overlay style ID"
+        },
+        "videoUrl": {
+          "type": "string",
+          "description": "The URL of the generated MP4 video file"
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Unix timestamp in milliseconds of record creation"
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the owner of this animation"
+        }
+      },
+      "required": ["id", "prompt", "aspectRatio", "durationSeconds", "motionStrength", "styleFilter", "createdAt", "userId"]
+    }
+  },
+  "firestore": {
+    "/animations/{animationId}": {
+      "schema": "animation",
+      "description": "Database collection storing animations for all registered users"
+    }
+  }
+}
