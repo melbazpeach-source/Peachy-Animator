@@ -50,8 +50,19 @@ import {
   Film,
   Crop,
   Scissors,
-  ChevronDown
+  ChevronDown,
+  Sliders,
+  AlertCircle
 } from 'lucide-react';
+import { 
+  VideoEngineId, 
+  TextLLMId, 
+  getVideoEngine, 
+  ALL_VIDEO_ENGINES, 
+  validateVideoEngineSelection,
+  enhanceAnimationPrompt 
+} from './providers';
+import { ProviderSettings } from './components/ProviderSettings';
 
 // @ts-ignore
 import { GIFEncoder, quantize, applyPalette } from 'gifenc';
@@ -144,6 +155,68 @@ const renderOverlayEffect = (styleId: string) => {
   }
 };
 
+export type ExportPreset = 'social' | 'cinematic' | 'square';
+
+export interface ExportPresetConfig {
+  id: ExportPreset;
+  name: string;
+  label: string;
+  badge: string;
+  description: string;
+  aspectRatioLabel: string;
+  targetAspect: number;
+  videoWidth: number;
+  videoHeight: number;
+  gifWidth: number;
+  gifHeight: number;
+  platformTags: string[];
+}
+
+export const EXPORT_PRESETS: Record<ExportPreset, ExportPresetConfig> = {
+  social: {
+    id: 'social',
+    name: "'Social Media' (vertical)",
+    label: 'Social Media',
+    badge: '9:16 Vertical',
+    description: 'Optimized for TikTok, Instagram Reels, YouTube Shorts, and vertical stories.',
+    aspectRatioLabel: '9:16',
+    targetAspect: 9 / 16,
+    videoWidth: 720,
+    videoHeight: 1280,
+    gifWidth: 225,
+    gifHeight: 400,
+    platformTags: ['TikTok', 'Reels', 'Shorts', 'Stories']
+  },
+  cinematic: {
+    id: 'cinematic',
+    name: "'Cinematic' (16:9)",
+    label: 'Cinematic',
+    badge: '16:9 Widescreen',
+    description: 'Optimized for YouTube, widescreen displays, TV, and cinematic presentations.',
+    aspectRatioLabel: '16:9',
+    targetAspect: 16 / 9,
+    videoWidth: 1280,
+    videoHeight: 720,
+    gifWidth: 400,
+    gifHeight: 225,
+    platformTags: ['YouTube', 'Desktop', 'TV', 'Cinema']
+  },
+  square: {
+    id: 'square',
+    name: "'Square'",
+    label: 'Square',
+    badge: '1:1 Balanced',
+    description: 'Optimized for Instagram feeds, carousels, Discord avatars, and square media.',
+    aspectRatioLabel: '1:1',
+    targetAspect: 1 / 1,
+    videoWidth: 720,
+    videoHeight: 720,
+    gifWidth: 320,
+    gifHeight: 320,
+    platformTags: ['Instagram Feed', 'Discord', 'Carousels', 'Thumbnails']
+  }
+};
+
 const App: React.FC = () => {
   // Authentication session state
   const [user, setUser] = useState<User | null>(null);
@@ -204,6 +277,7 @@ const App: React.FC = () => {
   const [trimEnd, setTrimEnd] = useState<number>(5);
   const [isExportingTrimmed, setIsExportingTrimmed] = useState<boolean>(false);
   const [trimProgress, setTrimProgress] = useState<string>('');
+  const [exportPreset, setExportPreset] = useState<ExportPreset>('cinematic');
   const [mediaUrls, setMediaUrls] = useState<Record<string, { image: string; video: string }>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -228,12 +302,13 @@ const App: React.FC = () => {
     }
   });
 
-  // Accordion state for options 3, 4, 5, 6 (3 open by default)
+  // Accordion state for options 3, 4, 5, 6, 7 (3 open by default)
   const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({
     '3': true,
     '4': false,
     '5': false,
     '6': false,
+    '7': false,
   });
 
   const toggleAccordion = (id: string) => {
@@ -241,6 +316,62 @@ const App: React.FC = () => {
       ...prev,
       [id]: !prev[id]
     }));
+  };
+
+  // Video Engine & Text LLM Provider State
+  const [selectedVideoEngine, setSelectedVideoEngine] = useState<VideoEngineId>(() => {
+    try {
+      const saved = localStorage.getItem('peachy_selected_video_engine');
+      if (saved && ALL_VIDEO_ENGINES.some(e => e.id === saved)) {
+        return saved as VideoEngineId;
+      }
+    } catch {}
+    return (process.env.SELECTED_VIDEO_ENGINE as VideoEngineId) || 'google-veo';
+  });
+
+  const [selectedTextLLM, setSelectedTextLLM] = useState<TextLLMId>(() => {
+    try {
+      const saved = localStorage.getItem('peachy_selected_text_llm');
+      if (saved) return saved as TextLLMId;
+    } catch {}
+    return (process.env.SELECTED_TEXT_LLM as TextLLMId) || 'google';
+  });
+
+  const [isPromptAssisting, setIsPromptAssisting] = useState<boolean>(false);
+  const [videoEngineError, setVideoEngineError] = useState<string | null>(null);
+
+  const handleSelectVideoEngine = (engineId: VideoEngineId) => {
+    setSelectedVideoEngine(engineId);
+    setVideoEngineError(null);
+    try {
+      localStorage.setItem('peachy_selected_video_engine', engineId);
+    } catch {}
+  };
+
+  const handleSelectTextLLM = (llmId: TextLLMId) => {
+    setSelectedTextLLM(llmId);
+    try {
+      localStorage.setItem('peachy_selected_text_llm', llmId);
+    } catch {}
+  };
+
+  const handlePromptAssist = async () => {
+    if (selectedTextLLM === 'none') {
+      setError("Please select a Text LLM (Google, OpenAI, xAI, Anthropic, or Ollama) in Settings (Section 7) to use AI Prompt Assist.");
+      setOpenAccordions(prev => ({ ...prev, '7': true }));
+      return;
+    }
+    setIsPromptAssisting(true);
+    setError(null);
+    try {
+      const enhanced = await enhanceAnimationPrompt(selectedTextLLM, prompt, imageFile?.name);
+      setPrompt(enhanced);
+    } catch (err: any) {
+      console.error("Prompt assist error:", err);
+      setError(`Prompt Assist (${selectedTextLLM}) failed: ${err.message || err}`);
+    } finally {
+      setIsPromptAssisting(false);
+    }
   };
 
   const loadingIntervalRef = useRef<number | null>(null);
@@ -455,6 +586,26 @@ const App: React.FC = () => {
     setError(null);
     setIsLoading(true);
 
+    // Validate selected video engine - Show plain error if someone picks a text LLM as the animator
+    const validation = validateVideoEngineSelection(selectedVideoEngine);
+    if (!validation.valid) {
+      const plainError = validation.error || `Cannot use "${selectedVideoEngine}" as the video animator. Peachy requires a dedicated video engine (such as Google Veo) to animate images.`;
+      setVideoEngineError(plainError);
+      setError(plainError);
+      return;
+    }
+
+    const engine = getVideoEngine(selectedVideoEngine);
+    if (!engine.hasKey()) {
+      const keyError = `Video engine key missing: Please configure ${engine.requiredEnvVar} in your environment to use ${engine.name}.`;
+      setError(keyError);
+      return;
+    }
+
+    setError(null);
+    setVideoEngineError(null);
+    setIsLoading(true);
+
     // Save prompt to history
     const trimmedPrompt = prompt.trim();
     setRecentPrompts(prev => {
@@ -475,8 +626,6 @@ const App: React.FC = () => {
     }, 3000);
     
     try {
-      const apiKey = process.env.API_KEY || (import.meta as any).env?.VITE_PEACHY_KEY || (process as any).env?.GEMINI_API_KEY;
-      const ai = new GoogleGenAI({ apiKey });
       const imageBase64 = await fileToBase64(imageFile);
       
       const getMotionDescriptor = (strength: number): string => {
@@ -489,128 +638,49 @@ const App: React.FC = () => {
 
       const finalPrompt = `${prompt.trim()}, ${getMotionDescriptor(motionStrength)}`;
 
-      let operation;
-      try {
-        operation = await ai.models.generateVideos({
-          model: 'veo-3.1-lite-generate-preview',
-          prompt: finalPrompt,
+      // Execute via the selected video engine interface
+      const videoBlob = await engine.generateVideo(
+        {
           image: {
             imageBytes: imageBase64,
             mimeType: imageFile.type,
           },
-          config: {
-            numberOfVideos: 1,
-            resolution: '720p',
-            aspectRatio: aspectRatio,
-          }
-        });
-      } catch (firstErr: any) {
-        const errMsg = firstErr.message || "";
-        if (errMsg.toLowerCase().includes("durationseconds") || errMsg.toLowerCase().includes("duration_seconds")) {
-          console.warn("Got durationSeconds error on initial request, retrying without durationSeconds to use model default (5s):", errMsg);
-          setDurationSeconds(5);
-          operation = await ai.models.generateVideos({
-            model: 'veo-3.1-lite-generate-preview',
-            prompt: finalPrompt,
-            image: {
-              imageBytes: imageBase64,
-              mimeType: imageFile.type,
-            },
-            config: {
-              numberOfVideos: 1,
-              resolution: '720p',
-              aspectRatio: aspectRatio,
-            }
-          });
-        } else {
-          throw firstErr;
+          prompt: finalPrompt,
+          aspectRatio,
+          durationSeconds,
+          motionStrength
+        },
+        (progressMessage) => {
+          setLoadingMessage(progressMessage);
         }
-      }
+      );
 
-      while (!operation.done) {
-        await new Promise(resolve => setTimeout(resolve, 10000));
-        operation = await ai.operations.getVideosOperation({ operation: operation });
-      }
-
-      console.log("Video generation operation completed:", operation);
-
-      // Handle server-side/API level error on the operation
-      if (operation.error) {
-        const errMsg = (operation.error as any).message || JSON.stringify(operation.error);
-        if (errMsg.toLowerCase().includes("durationseconds") || errMsg.toLowerCase().includes("duration_seconds")) {
-          console.warn("Operation completed with durationSeconds error. Retrying with model default (5s)...");
-          setDurationSeconds(5);
-          operation = await ai.models.generateVideos({
-            model: 'veo-3.1-lite-generate-preview',
-            prompt: finalPrompt,
-            image: {
-              imageBytes: imageBase64,
-              mimeType: imageFile.type,
-            },
-            config: {
-              numberOfVideos: 1,
-              resolution: '720p',
-              aspectRatio: aspectRatio,
-            }
-          });
-          while (!operation.done) {
-            await new Promise(resolve => setTimeout(resolve, 10000));
-            operation = await ai.operations.getVideosOperation({ operation: operation });
-          }
-          if (operation.error) {
-            const retryErrMsg = (operation.error as any).message || JSON.stringify(operation.error);
-            throw new Error(`Video generation retry failed: ${retryErrMsg}`);
-          }
-        } else {
-          throw new Error(`Video generation failed: ${errMsg}`);
-        }
-      }
-
-      const response = operation.response;
-      // Handle RAI safety filters filtering the output
-      if (response?.raiMediaFilteredCount && response.raiMediaFilteredCount > 0) {
-        const reasons = response.raiMediaFilteredReasons?.join(", ") || "";
-        throw new Error(`Video generation filtered due to safety/policy reasons (RAI)${reasons ? `: ${reasons}` : "."}`);
-      }
-
-      const downloadLink = response?.generatedVideos?.[0]?.video?.uri;
-      
-      if (!downloadLink) {
-        throw new Error("Video generation completed, but no download link was found in the response.");
-      }
-      
-      const videoResponse = await fetch(downloadLink, {
-        headers: {
-          'x-goog-api-key': process.env.API_KEY || ''
-        }
-      });
-      if (!videoResponse.ok) {
-        throw new Error(`Failed to download video: ${videoResponse.statusText}`);
-      }
-
-      const videoBlob = await videoResponse.blob();
       setCurrentVideoBlob(videoBlob);
       setHasSavedCurrent(false);
       setVideoUrl(URL.createObjectURL(videoBlob));
+      setExportPreset(aspectRatio === '9:16' ? 'social' : 'cinematic');
 
     } catch (err: any) {
       let errorMessage = err.message || "An unknown error occurred.";
       const errStr = typeof err === 'object' ? JSON.stringify(err) : String(err);
       
-      if (
-        errorMessage.includes("429") || 
-        errorMessage.includes("RESOURCE_EXHAUSTED") || 
-        errorMessage.toLowerCase().includes("quota") ||
-        errStr.includes("RESOURCE_EXHAUSTED") || 
-        errStr.includes("429")
-      ) {
-        errorMessage = "You have reached your current Gemini/Veo quota limit (429 RESOURCE_EXHAUSTED). Video generation models require an API key with available quota or an active billing plan. Please select or switch your API key to continue.";
-      } else if (errorMessage.includes("Requested entity was not found")) {
-        errorMessage = "Your API key is invalid or not found. Please select a valid key and try again.";
-        setApiKeySelected(false);
-      } else if(errorMessage.includes("API key not valid")){
-        errorMessage = "Your API key is not valid. Please select a valid key and try again.";
-        setApiKeySelected(false);
+      // Quota / billing errors stay Google-shaped for Veo. Don't map them onto other vendors.
+      if (engine.id === 'google-veo') {
+        if (
+          errorMessage.includes("429") || 
+          errorMessage.includes("RESOURCE_EXHAUSTED") || 
+          errorMessage.toLowerCase().includes("quota") ||
+          errStr.includes("RESOURCE_EXHAUSTED") || 
+          errStr.includes("429")
+        ) {
+          errorMessage = "You have reached your current Gemini/Veo quota limit (429 RESOURCE_EXHAUSTED). Video generation models require an API key with available quota or an active billing plan. Please select or switch your API key to continue.";
+        } else if (errorMessage.includes("Requested entity was not found")) {
+          errorMessage = "Your API key is invalid or not found. Please select a valid key and try again.";
+          setApiKeySelected(false);
+        } else if (errorMessage.includes("API key not valid")) {
+          errorMessage = "Your API key is not valid. Please select a valid key and try again.";
+          setApiKeySelected(false);
+        }
       }
       console.error("Video generation error:", err);
       setError(errorMessage);
@@ -620,7 +690,7 @@ const App: React.FC = () => {
         clearInterval(loadingIntervalRef.current);
       }
     }
-  }, [imageFile, prompt, aspectRatio, durationSeconds, motionStrength, styleFilter]);
+  }, [imageFile, prompt, aspectRatio, durationSeconds, motionStrength, styleFilter, selectedVideoEngine]);
 
   // Synchronize player time / settings when URL changes
   useEffect(() => {
@@ -836,6 +906,7 @@ const App: React.FC = () => {
       setVideoUrl(video.videoUrl);
       setCurrentVideoBlob(null); // we stream directly from the cloud Url
     }
+    setExportPreset(video.aspectRatio === '9:16' ? 'social' : 'cinematic');
     setHasSavedCurrent(true);
     
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -843,8 +914,11 @@ const App: React.FC = () => {
 
   const isTrimmed = trimStart > 0.01 || trimEnd < (videoDuration - 0.01 || 4.99);
 
-  const createTrimmedBlob = async (): Promise<Blob> => {
+  const createTrimmedBlob = async (options?: { preset?: ExportPreset; ignoreTrim?: boolean }): Promise<Blob> => {
     if (!videoUrl) throw new Error("No video URL loaded.");
+
+    const activePreset = options?.preset || exportPreset;
+    const presetConfig = EXPORT_PRESETS[activePreset];
 
     const video = document.createElement('video');
     video.src = videoUrl;
@@ -857,12 +931,13 @@ const App: React.FC = () => {
       video.onerror = () => reject(new Error("Failed to load video metadata for trimming."));
     });
 
-    const width = video.videoWidth || 720;
-    const height = video.videoHeight || 405;
+    const targetWidth = presetConfig.videoWidth;
+    const targetHeight = presetConfig.videoHeight;
+    const targetAspect = presetConfig.targetAspect;
 
     const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error("Could not initialize 2D context.");
 
@@ -875,6 +950,24 @@ const App: React.FC = () => {
       filterStr = 'grayscale(100%) contrast(135%) brightness(95%)';
     } else if (styleFilter === 'vibrant') {
       filterStr = 'saturate(185%) contrast(115%) brightness(105%)';
+    }
+
+    // Compute center-crop parameters from source video into preset aspect
+    const sourceVideoWidth = video.videoWidth || targetWidth;
+    const sourceVideoHeight = video.videoHeight || targetHeight;
+    const sourceAspect = sourceVideoWidth / sourceVideoHeight;
+
+    let sx = 0;
+    let sy = 0;
+    let sWidth = sourceVideoWidth;
+    let sHeight = sourceVideoHeight;
+
+    if (sourceAspect > targetAspect) {
+      sWidth = sourceVideoHeight * targetAspect;
+      sx = (sourceVideoWidth - sWidth) / 2;
+    } else {
+      sHeight = sourceVideoWidth / targetAspect;
+      sy = (sourceVideoHeight - sHeight) / 2;
     }
 
     const stream = canvas.captureStream(30); // 30 FPS
@@ -907,96 +1000,133 @@ const App: React.FC = () => {
 
     mediaRecorder.start();
 
-    const duration = trimEnd - trimStart;
+    const startSec = options?.ignoreTrim ? 0 : trimStart;
+    const endSec = options?.ignoreTrim ? (videoDuration || 5) : trimEnd;
+    const duration = Math.max(0.2, endSec - startSec);
     const fps = 30;
     const interval = 1 / fps;
     const totalNumFrames = Math.ceil(duration / interval);
 
     for (let i = 0; i < totalNumFrames; i++) {
-      const time = trimStart + (i * interval);
-      video.currentTime = Math.min(time, trimEnd - 0.01);
+      const time = startSec + (i * interval);
+      video.currentTime = Math.min(time, endSec - 0.01);
 
       await new Promise<void>((resolve) => {
         video.onseeked = () => resolve();
       });
 
-      ctx.clearRect(0, 0, width, height);
+      ctx.clearRect(0, 0, targetWidth, targetHeight);
       ctx.filter = filterStr;
-      ctx.drawImage(video, 0, 0, width, height);
+      ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, targetWidth, targetHeight);
 
       ctx.filter = 'none';
       if (styleFilter === 'vintage') {
-        const grad = ctx.createRadialGradient(width/2, height/2, Math.min(width, height)*0.3, width/2, height/2, Math.max(width, height)*0.75);
+        const grad = ctx.createRadialGradient(targetWidth/2, targetHeight/2, Math.min(targetWidth, targetHeight)*0.3, targetWidth/2, targetHeight/2, Math.max(targetWidth, targetHeight)*0.75);
         grad.addColorStop(0, 'rgba(0,0,0,0)');
         grad.addColorStop(1, 'rgba(0,0,0,0.3)');
         ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, width, height);
+        ctx.fillRect(0, 0, targetWidth, targetHeight);
       } else if (styleFilter === 'cyberpunk') {
         ctx.fillStyle = 'rgba(236, 72, 153, 0.08)';
-        ctx.fillRect(0, 0, width, height);
+        ctx.fillRect(0, 0, targetWidth, targetHeight);
+      } else if (styleFilter === 'bw') {
+        const grad = ctx.createRadialGradient(targetWidth/2, targetHeight/2, Math.min(targetWidth, targetHeight)*0.25, targetWidth/2, targetHeight/2, Math.max(targetWidth, targetHeight)*0.75);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.45)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, targetWidth, targetHeight);
+      } else if (styleFilter === 'vibrant') {
+        const grad = ctx.createLinearGradient(0, 0, 0, targetHeight);
+        grad.addColorStop(0, 'rgba(253, 224, 71, 0.04)');
+        grad.addColorStop(1, 'rgba(249, 115, 22, 0.04)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, targetWidth, targetHeight);
       }
 
-      setTrimProgress(`Trimming video: ${Math.round(((i + 1) / totalNumFrames) * 100)}%`);
+      setTrimProgress(`Processing ${presetConfig.label} export: ${Math.round(((i + 1) / totalNumFrames) * 100)}%`);
     }
 
     mediaRecorder.stop();
     return await recordingCompleted;
   };
 
-  const handleDownloadTrimmed = async () => {
+  const handleDownloadPresetVideo = async (ignoreTrim = false) => {
     if (!videoUrl) return;
+    const presetConfig = EXPORT_PRESETS[exportPreset];
+    const isOriginalAspectMatch = 
+      (aspectRatio === '16:9' && exportPreset === 'cinematic') ||
+      (aspectRatio === '9:16' && exportPreset === 'social');
+
+    // If matches original aspect ratio, has no trim (or ignoreTrim), and no live filter applied, direct download
+    if (isOriginalAspectMatch && (!isTrimmed || ignoreTrim) && styleFilter === 'none') {
+      handleDownloadOriginal();
+      return;
+    }
+
     setIsExportingTrimmed(true);
-    setTrimProgress("Preparing trimmed video...");
+    setTrimProgress(`Preparing ${presetConfig.label} (${presetConfig.aspectRatioLabel})...`);
     try {
-      const trimmedBlob = await createTrimmedBlob();
-      const isMp4 = trimmedBlob.type.includes('mp4');
+      const exportBlob = await createTrimmedBlob({ preset: exportPreset, ignoreTrim });
+      const isMp4 = exportBlob.type.includes('mp4');
       const ext = isMp4 ? 'mp4' : 'webm';
 
-      const downloadUrl = URL.createObjectURL(trimmedBlob);
+      const downloadUrl = URL.createObjectURL(exportBlob);
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = `peachy-animation-trimmed-${Date.now()}.${ext}`;
+      a.download = `peachy-${exportPreset}-${Date.now()}.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(downloadUrl);
     } catch (err) {
-      console.error("Video trimming failed, downloading original direct:", err);
-      handleDownload();
+      console.error("Preset export failed, downloading original direct:", err);
+      handleDownloadOriginal();
     } finally {
       setIsExportingTrimmed(false);
       setTrimProgress('');
     }
   };
 
+  const handleDownloadOriginal = () => {
+    if (!videoUrl) return;
+    const a = document.createElement('a');
+    a.href = videoUrl;
+    a.download = `peachy-original-${Date.now()}.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   const handleShare = async () => {
     if (!videoUrl) return;
     setIsSharing(true);
+    setTrimProgress("Preparing share video...");
     try {
+      const presetConfig = EXPORT_PRESETS[exportPreset];
+      const isOriginalAspectMatch = 
+        (aspectRatio === '16:9' && exportPreset === 'cinematic') ||
+        (aspectRatio === '9:16' && exportPreset === 'social');
+
       let blob: Blob;
-      if (isTrimmed) {
-        blob = await createTrimmedBlob();
+      if (isTrimmed || !isOriginalAspectMatch || styleFilter !== 'none') {
+        blob = await createTrimmedBlob({ preset: exportPreset });
       } else {
         const response = await fetch(videoUrl);
         blob = await response.blob();
       }
       const isMp4 = blob.type.includes('mp4');
       const ext = isMp4 ? 'mp4' : 'webm';
-      const file = new File([blob], `peachy-animation.${ext}`, { type: blob.type || "video/mp4" });
+      const file = new File([blob], `peachy-${exportPreset}.${ext}`, { type: blob.type || "video/mp4" });
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
           title: 'My Peachy Animation',
-          text: `Check out this video I made with Peachy! Prompt: "${prompt}"`,
+          text: `Check out this ${presetConfig.name} video I made with Peachy! Prompt: "${prompt}"`,
         });
       } else {
         // Fallback if share sheet isn't available
-        if (isTrimmed) {
-          await handleDownloadTrimmed();
-        } else {
-          handleDownload();
-        }
+        await handleDownloadPresetVideo();
       }
     } catch (error) {
       console.error("Error sharing:", error);
@@ -1006,25 +1136,16 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDownload = () => {
-    if (!videoUrl) return;
-    const a = document.createElement('a');
-    a.href = videoUrl;
-    a.download = `peachy-animation-${Date.now()}.mp4`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-
   const handleExportGif = async () => {
-    if (!currentVideoBlob) return;
+    if (!currentVideoBlob && !videoUrl) return;
     setIsExportingGif(true);
     setGifProgress("Loading video metadata...");
     setError(null);
 
     try {
+      const presetConfig = EXPORT_PRESETS[exportPreset];
       const video = document.createElement('video');
-      const url = URL.createObjectURL(currentVideoBlob);
+      const url = currentVideoBlob ? URL.createObjectURL(currentVideoBlob) : (videoUrl || '');
       video.src = url;
       video.muted = true;
       video.playsInline = true;
@@ -1035,13 +1156,10 @@ const App: React.FC = () => {
         video.onerror = () => reject(new Error("Unable to load video for GIF rendering."));
       });
 
-      // Maintain high resolution yet lightweight limits for fast encoder execution
-      let width = 400;
-      let height = 225; // default 16:9
-      if (aspectRatio === '9:16') {
-        width = 225;
-        height = 400;
-      }
+      // Target dimensions from the selected preset
+      const width = presetConfig.gifWidth;
+      const height = presetConfig.gifHeight;
+      const targetAspect = presetConfig.targetAspect;
 
       const canvas = document.createElement('canvas');
       canvas.width = width;
@@ -1049,12 +1167,30 @@ const App: React.FC = () => {
       const ctx = canvas.getContext('2d');
       if (!ctx) throw new Error("Could not initialize 2D rendering canvas context.");
 
-          // Calculate sample frames
+      // Calculate center crop from source video into preset aspect
+      const sourceVideoWidth = video.videoWidth || width;
+      const sourceVideoHeight = video.videoHeight || height;
+      const sourceAspect = sourceVideoWidth / sourceVideoHeight;
+
+      let sx = 0;
+      let sy = 0;
+      let sWidth = sourceVideoWidth;
+      let sHeight = sourceVideoHeight;
+
+      if (sourceAspect > targetAspect) {
+        sWidth = sourceVideoHeight * targetAspect;
+        sx = (sourceVideoWidth - sWidth) / 2;
+      } else {
+        sHeight = sourceVideoWidth / targetAspect;
+        sy = (sourceVideoHeight - sHeight) / 2;
+      }
+
+      // Calculate sample frames
       const fps = 8;
       const frameInterval = 1 / fps;
       const startSec = trimStart;
       const endSec = trimEnd;
-      const duration = endSec - startSec;
+      const duration = Math.max(0.2, endSec - startSec);
       const totalFrames = Math.ceil(duration / frameInterval);
 
       const gif = GIFEncoder();
@@ -1086,22 +1222,20 @@ const App: React.FC = () => {
           video.onseeked = () => resolve();
         });
 
-        // 1. Draw frame to canvas under filter
+        // 1. Draw frame to canvas under filter with center crop
         ctx.clearRect(0, 0, width, height);
         ctx.filter = filterStr;
-        ctx.drawImage(video, 0, 0, width, height);
+        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, width, height);
 
         // 2. Draw custom aesthetic vector overlays/vignettes
         ctx.filter = 'none';
         if (styleFilter === 'vintage') {
-          // Soft cinematic vignetting
           const grad = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.3, width / 2, height / 2, Math.max(width, height) * 0.75);
           grad.addColorStop(0, 'rgba(0,0,0,0)');
           grad.addColorStop(1, 'rgba(0,0,0,0.3)');
           ctx.fillStyle = grad;
           ctx.fillRect(0, 0, width, height);
 
-          // Simulated film dust speckles
           ctx.fillStyle = 'rgba(255,255,255,0.05)';
           for (let s = 0; s < 120; s++) {
             const rx = Math.random() * width;
@@ -1110,7 +1244,7 @@ const App: React.FC = () => {
             ctx.fillRect(rx, ry, rSize, rSize);
           }
         } else if (styleFilter === 'cyberpunk') {
-          ctx.fillStyle = 'rgba(236, 72, 153, 0.08)'; // Neon magenta tint glow
+          ctx.fillStyle = 'rgba(236, 72, 153, 0.08)';
           ctx.fillRect(0, 0, width, height);
         } else if (styleFilter === 'bw') {
           const grad = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.25, width / 2, height / 2, Math.max(width, height) * 0.75);
@@ -1140,7 +1274,7 @@ const App: React.FC = () => {
 
         // 4. Update progression
         const pct = Math.round(((i + 1) / totalFrames) * 100);
-        setGifProgress(`Baking GIF: ${pct}%`);
+        setGifProgress(`Baking ${presetConfig.label} GIF: ${pct}%`);
       }
 
       gif.finish();
@@ -1150,12 +1284,14 @@ const App: React.FC = () => {
       const downloadUrl = URL.createObjectURL(gifBlob);
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = `peachy-animation-${Date.now()}.gif`;
+      a.download = `peachy-${exportPreset}-${Date.now()}.gif`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(downloadUrl);
-      URL.revokeObjectURL(url);
+      if (currentVideoBlob) {
+        URL.revokeObjectURL(url);
+      }
     } catch (err: any) {
       console.error("GIF generation failed:", err);
       setError("Failed to convert video animation to GIF format. Please try again.");
@@ -1428,6 +1564,59 @@ const App: React.FC = () => {
              </p>
           </div>
 
+          {/* Export Settings & Preset Dropdown */}
+          <div className="space-y-3 bg-white/90 p-4 rounded-2xl border-2 border-orange-200/80 shadow-xs">
+             <div className="flex items-center justify-between flex-wrap gap-2">
+                <label 
+                  htmlFor="export-preset-select" 
+                  className="flex items-center gap-2 text-xs sm:text-sm font-extrabold text-orange-950 uppercase tracking-wider"
+                >
+                   <Sliders className="w-4 h-4 text-orange-500" />
+                   <span>Export Preset</span>
+                </label>
+                <div className="flex items-center gap-1.5">
+                   <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-orange-100 text-orange-800 border border-orange-200">
+                     {EXPORT_PRESETS[exportPreset].badge}
+                   </span>
+                   <span className="text-[11px] font-medium text-orange-700">
+                     ({EXPORT_PRESETS[exportPreset].videoWidth}x{EXPORT_PRESETS[exportPreset].videoHeight})
+                   </span>
+                </div>
+             </div>
+
+             <div className="relative">
+                <select
+                  id="export-preset-select"
+                  value={exportPreset}
+                  onChange={(e) => setExportPreset(e.target.value as ExportPreset)}
+                  className="w-full bg-orange-50/70 border-2 border-orange-300 text-orange-950 text-sm sm:text-base font-bold rounded-xl px-3.5 py-3 pr-10 focus:outline-hidden focus:border-orange-500 focus:ring-2 focus:ring-orange-300/40 transition-all appearance-none cursor-pointer"
+                >
+                  <option value="social">'Social Media' (vertical)</option>
+                  <option value="cinematic">'Cinematic' (16:9)</option>
+                  <option value="square">'Square'</option>
+                </select>
+                <div className="absolute inset-y-0 right-0 flex items-center pr-3.5 pointer-events-none text-orange-600">
+                  <ChevronDown className="w-5 h-5" />
+                </div>
+             </div>
+
+             <div className="flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-orange-100">
+                <p className="text-[11px] text-orange-800 font-medium">
+                  {EXPORT_PRESETS[exportPreset].description}
+                </p>
+                <div className="flex flex-wrap items-center gap-1">
+                  {EXPORT_PRESETS[exportPreset].platformTags.map((tag) => (
+                    <span 
+                      key={tag} 
+                      className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-orange-50 text-orange-700 border border-orange-200/60"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+             </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
              {/* Save to Browser Button */}
              <button 
@@ -1472,48 +1661,68 @@ const App: React.FC = () => {
              {/* Download Button */}
              <div className="flex flex-col gap-1.5 justify-center">
                <button 
-                  onClick={isTrimmed ? handleDownloadTrimmed : handleDownload}
+                  id="download-preset-btn"
+                  onClick={() => handleDownloadPresetVideo(false)}
                   disabled={isExportingTrimmed}
                   className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3.5 px-4 rounded-xl transition-all duration-300 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 flex items-center justify-center gap-2 text-sm sm:text-base cursor-pointer"
                >
                   {isExportingTrimmed ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span className="truncate">{trimProgress || "Trimming..."}</span>
+                      <span className="truncate">{trimProgress || "Processing..."}</span>
                     </>
                   ) : (
                     <>
                       <Download className="w-4 h-4" />
-                      <span className="truncate">{isTrimmed ? "Download Trimmed" : "Download"}</span>
+                      <span className="truncate">
+                        {isTrimmed 
+                          ? `Download Trimmed (${EXPORT_PRESETS[exportPreset].label})` 
+                          : `Download (${EXPORT_PRESETS[exportPreset].label})`}
+                      </span>
                     </>
                   )}
                </button>
-               {isTrimmed && !isExportingTrimmed && (
-                 <button 
-                   type="button"
-                   onClick={handleDownload}
-                   className="text-[10px] text-green-700 hover:text-green-950 font-bold underline text-center cursor-pointer"
-                 >
-                   Download Full Length
-                 </button>
-               )}
+               <div className="flex items-center justify-center gap-2 flex-wrap">
+                 {isTrimmed && !isExportingTrimmed && (
+                   <button 
+                     id="download-full-preset-btn"
+                     type="button"
+                     onClick={() => handleDownloadPresetVideo(true)}
+                     className="text-[10px] text-green-700 hover:text-green-950 font-bold underline text-center cursor-pointer"
+                   >
+                     Full Length ({EXPORT_PRESETS[exportPreset].label})
+                   </button>
+                 )}
+                 {!isExportingTrimmed && (
+                   <button 
+                     id="download-raw-original-btn"
+                     type="button"
+                     onClick={handleDownloadOriginal}
+                     className="text-[10px] text-orange-700 hover:text-orange-950 font-bold underline text-center cursor-pointer"
+                     title="Download original raw animation without preset crop"
+                   >
+                     Raw Original ({aspectRatio})
+                   </button>
+                 )}
+               </div>
              </div>
 
              {/* Export as GIF Button */}
              <button 
+                id="export-gif-btn"
                 onClick={handleExportGif}
-                disabled={isExportingGif || !currentVideoBlob}
+                disabled={isExportingGif || (!currentVideoBlob && !videoUrl)}
                 className="bg-purple-500 hover:bg-purple-650 hover:shadow-lg text-white font-bold py-3 px-4 rounded-xl transition-all duration-300 shadow-md transform hover:-translate-y-0.5 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
              >
                 {isExportingGif ? (
                    <>
                       <RefreshCw className="w-5 h-5 animate-spin" />
-                      <span>{gifProgress || "Converting..."}</span>
+                      <span className="truncate">{gifProgress || "Converting..."}</span>
                    </>
                 ) : (
                    <>
                       <Film className="w-5 h-5" />
-                      Export as GIF
+                      <span className="truncate">Export GIF ({EXPORT_PRESETS[exportPreset].label})</span>
                    </>
                 )}
              </button>
@@ -1606,7 +1815,24 @@ const App: React.FC = () => {
         
         {/* Prompt Input */}
         <div>
-          <label htmlFor="prompt" className="block text-lg font-bold text-orange-900 mb-2">2. Describe the motion</label>
+          <div className="flex items-center justify-between mb-2">
+            <label htmlFor="prompt" className="text-lg font-bold text-orange-900">2. Describe the motion</label>
+            <button
+              type="button"
+              onClick={handlePromptAssist}
+              disabled={isPromptAssisting}
+              title={selectedTextLLM === 'none' ? 'Select a Text LLM in Settings to enable Prompt Assist' : `Enhance prompt with ${selectedTextLLM.toUpperCase()}`}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-orange-100 hover:bg-orange-200 text-orange-900 text-xs font-bold rounded-lg border border-orange-200 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <Sparkles className={`w-3.5 h-3.5 text-orange-600 ${isPromptAssisting ? 'animate-spin' : ''}`} />
+              <span>{isPromptAssisting ? 'Enhancing...' : 'AI Prompt Assist'}</span>
+              {selectedTextLLM !== 'none' && (
+                <span className="text-[10px] bg-white/80 px-1.5 py-0.5 rounded text-orange-850 font-mono">
+                  {selectedTextLLM}
+                </span>
+              )}
+            </button>
+          </div>
           <textarea
             id="prompt"
             value={prompt}
@@ -1873,6 +2099,37 @@ const App: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* 7. AI Engine & Provider Settings */}
+          <div className="border border-orange-200/80 bg-white/80 rounded-2xl overflow-hidden shadow-2xs transition-all duration-200 hover:border-orange-300">
+            <button
+              type="button"
+              onClick={() => toggleAccordion('7')}
+              className="w-full flex items-center justify-between p-3.5 sm:p-4 text-left transition-colors bg-white/60 hover:bg-orange-50/70 select-none cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5">
+                <Sliders className="w-5 h-5 text-orange-500" />
+                <span className="text-base sm:text-lg font-bold text-orange-900">7. AI Engine & Provider Settings</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="bg-orange-100 text-orange-850 font-bold px-2.5 py-0.5 rounded-full text-xs">
+                  {getVideoEngine(selectedVideoEngine).name} • {selectedTextLLM === 'none' ? 'No Text LLM' : selectedTextLLM.toUpperCase()}
+                </span>
+                <ChevronDown className={`w-5 h-5 text-orange-400 transition-transform duration-200 ${openAccordions['7'] ? 'rotate-180 text-orange-600' : ''}`} />
+              </div>
+            </button>
+            {openAccordions['7'] && (
+              <div className="px-4 pb-4 pt-2 border-t border-orange-100/60 bg-white/40">
+                <ProviderSettings
+                  selectedVideoEngine={selectedVideoEngine}
+                  onSelectVideoEngine={handleSelectVideoEngine}
+                  selectedTextLLM={selectedTextLLM}
+                  onSelectTextLLM={handleSelectTextLLM}
+                  videoEngineError={videoEngineError}
+                />
+              </div>
+            )}
+          </div>
         </div>
         
         {error && (
@@ -1893,13 +2150,45 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <button 
-          onClick={handleGenerateVideo}
-          disabled={!imageFile || !prompt.trim() || isLoading}
-          className="w-full bg-gradient-to-r from-pink-500 to-orange-500 hover:from-pink-600 hover:to-orange-600 text-white font-bold py-4 px-6 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed disabled:shadow-none transform hover:-translate-y-1 disabled:transform-none text-lg"
-        >
-          ✨ Animate It!
-        </button>
+        {(() => {
+          const currentEngine = getVideoEngine(selectedVideoEngine);
+          const hasKey = currentEngine.hasKey();
+          const isStub = !currentEngine.isImplemented;
+          const isAnimateDisabled = !imageFile || !prompt.trim() || isLoading || !hasKey || isStub || Boolean(videoEngineError);
+
+          return (
+            <div className="space-y-2">
+              {videoEngineError && (
+                <div className="bg-red-50 border border-red-200 p-3 rounded-xl text-center text-xs font-bold text-red-700 flex items-center justify-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{videoEngineError}</span>
+                </div>
+              )}
+
+              <button 
+                onClick={handleGenerateVideo}
+                disabled={isAnimateDisabled}
+                className="w-full bg-gradient-to-r from-pink-500 to-orange-500 hover:from-pink-600 hover:to-orange-600 text-white font-bold py-4 px-6 rounded-xl transition-all duration-300 shadow-lg hover:shadow-xl disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed disabled:shadow-none transform hover:-translate-y-1 disabled:transform-none text-lg cursor-pointer disabled:cursor-not-allowed"
+              >
+                ✨ Animate It!
+              </button>
+
+              {!hasKey && (
+                <p className="text-xs font-semibold text-red-600 text-center flex items-center justify-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  Animate disabled: {currentEngine.requiredEnvVar} is missing from environment for {currentEngine.name}.
+                </p>
+              )}
+
+              {hasKey && isStub && (
+                <p className="text-xs font-semibold text-amber-700 text-center flex items-center justify-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  Animate disabled: {currentEngine.name} is a stubbed engine. Please select Google Veo in Section 7.
+                </p>
+              )}
+            </div>
+          );
+        })()}
       </div>
     );
   };
